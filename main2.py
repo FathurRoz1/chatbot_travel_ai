@@ -3,22 +3,25 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
+from chatlog_db import save_chatlog
 
 # === LangChain dan Chroma ===
-from langchain_groq import ChatGroq
-from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
 from langchain_core.runnables import RunnablePassthrough
+from langchain_groq import ChatGroq
+
 
 # === Import Prompt Template ===
 from prompt_template import get_prompt
 
 # === Load file .env ===
 load_dotenv()
+print("DEBUG ENV:", os.getenv("DB_HOST"), os.getenv("DB_NAME"), os.getenv("DB_USER"))
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-oss-safeguard-20b")
+MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
 
 CHROMA_PATH = "./chroma_db"
 DATA_PATH = "./data"
@@ -68,24 +71,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 import re
 
-def format_to_html(text: str) -> str:
-    """Bersihkan HTML yang tidak didukung Telegram dan ubah agar tampil rapi."""
-    # Ubah <br> jadi newline
+def format_to_list(text: str) -> str:
+    """Ubah format teks menjadi daftar tanpa tabel dan HTML."""
+    # Ubah **bold** jadi bold biasa tanpa tag HTML
+    # text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+
+    # Hapus simbol bullet '•' yang tidak diinginkan
+    # text = re.sub(r"•", "", text)
+
+    # Hapus tag <br> dan <br /> yang tidak diperlukan
     text = re.sub(r"<br\s*/?>", "\n", text)
 
-    # Ubah **bold** jadi <b>bold</b>
-    text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
-
-    # Hapus table markdown (| kolom | kolom |)
-    text = re.sub(r"\|.*?\|", "", text)
-
-    # Hapus garis tabel atau karakter tidak penting
-    text = re.sub(r"[-–]+", "", text)
+    # Hapus garis atau karakter yang tidak perlu dari format tabel
+    # text = re.sub(r"[--]+", "", text)
 
     # Bersihkan spasi berlebih
     text = re.sub(r"\n{2,}", "\n", text).strip()
 
     return text
+
 
 
 
@@ -111,23 +115,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         answer = response.content.strip()
 
         # 🔹 Format teks sebelum dikirim
-        # formatted_answer = format_to_html(answer)
+        formatted_answer = format_to_list(answer)
 
-        print(f"💬 Bot menjawab: {answer}")
+        save_chatlog(user_text, answer, user_id, 1)
+
+        print(f"💬 Bot menjawab: {formatted_answer}")
         await update.message.reply_text(
-            answer,
-            # parse_mode="HTML",
+            formatted_answer,
+            parse_mode="Markdown",
             # disable_web_page_preview=True
         )
 
-
         # Simpan konteks terbaru (maksimal 5 percakapan terakhir)
-        new_context = f"{previous_context}\nPengguna: {user_text}\nBot: {answer}"
+        new_context = f"{previous_context}\nPengguna: {user_text}\nBot: {formatted_answer}"
         user_memory[user_id] = "\n".join(new_context.splitlines()[-10:])  # batasi agar tidak terlalu panjang
 
     except Exception as e:
         print(f"❌ Error: {e}")
         await update.message.reply_text("⚠️ Maaf, terjadi kesalahan saat memproses pesan Anda.")
+
 
 
 
