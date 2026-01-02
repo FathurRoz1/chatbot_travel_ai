@@ -54,6 +54,9 @@ def get_prompt():
 
     7. **Jika pertanyaan menyebut 'perhari' atau 'per hari':**
     - Carilah informasi harga yang mengandung kata 'per hari' atau '/ hari' dalam dokumen.
+                                            
+    8. **Jika pertanyaan tentang cara memesan**
+    - jangan berikan jawaban menebak, arahkan pengguna untuk mengunjungi website resmi atau menghubungi kontak yang tersedia di dokumen.
 
     ---
 

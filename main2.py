@@ -17,7 +17,6 @@ from prompt_template import get_prompt
 
 # === Load file .env ===
 load_dotenv()
-print("DEBUG ENV:", os.getenv("DB_HOST"), os.getenv("DB_NAME"), os.getenv("DB_USER"))
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
