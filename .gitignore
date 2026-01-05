@@ -1,3 +1,6 @@
 .env
+venv/
 api_groq.txt
 *.env
+chroma_db/
+__pycache__/

@@ -23,7 +23,7 @@ def load_documents():
     for file in os.listdir(DATA_DIR):
         # Lewati file yang sudah pernah diproses
         if file in processed_files:
-            print(f"⚠️ Lewati {file} (sudah pernah diproses)")
+            print(f"[INFO] Lewati {file} (sudah pernah diproses)")
             continue
 
         path = os.path.join(DATA_DIR, file)
@@ -32,10 +32,10 @@ def load_documents():
         elif file.endswith(".txt"):
             loader = TextLoader(path)
         else:
-            print(f"❌ Format file tidak didukung: {file}")
+            print(f"[ERROR] Format file tidak didukung: {file}")
             continue
 
-        print(f"📄 Memuat {file} ...")
+        print(f"[INFO] Memuat {file} ...")
         docs.extend(loader.load())
 
         # Tambahkan ke daftar file yang sudah diproses
@@ -43,16 +43,16 @@ def load_documents():
 
     return docs
 
-print("🔍 Memuat dokumen...")
+print("[INFO] Memuat dokumen...")
 documents = load_documents()
-print(f"✅ Ditemukan {len(documents)} dokumen baru.")
+print(f"[OK] Ditemukan {len(documents)} dokumen baru.")
 
 if len(documents) > 0:
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     texts = splitter.split_documents(documents)
-    print(f"📑 Terbagi menjadi {len(texts)} potongan teks.")
+    print(f"[INFO] Terbagi menjadi {len(texts)} potongan teks.")
 
-    print("💾 Menyimpan ke ChromaDB...")
+    print("[INFO] Menyimpan ke ChromaDB...")
     db = Chroma(
         persist_directory=CHROMA_DIR,
         embedding_function=embeddings
@@ -64,6 +64,6 @@ if len(documents) > 0:
     with open(PROCESSED_FILE, "w") as f:
         json.dump(list(processed_files), f)
 
-    print("🎉 Dataset berhasil diperbarui tanpa duplikasi.")
+    print("[OK] Dataset berhasil diperbarui tanpa duplikasi.")
 else:
-    print("✅ Tidak ada file baru untuk diproses.")
+    print("[OK] Tidak ada file baru untuk diproses.")
