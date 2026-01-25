@@ -1,4 +1,5 @@
 import os
+import re
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -7,7 +8,7 @@ from chatlog_db import save_chatlog
 
 # === LangChain dan Chroma ===
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq
 
@@ -68,7 +69,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Halo 👋! Saya Chatbot Virtual Assistant Travel Malang ID. Silahkan tanyakan apa saja seputar travel di Malang."
     )
 
-import re
 
 def format_to_list(text: str) -> str:
     """Ubah format teks menjadi daftar tanpa tabel dan HTML."""
@@ -90,7 +90,67 @@ def format_to_list(text: str) -> str:
     return text
 
 
+def classify_answer_status(answer: str) -> int:
+    """
+    Return:
+      0 = bot tidak bisa menjawab / fallback
+      1 = bot bisa menjawab
+    """
+    if not answer:
+        return 0
 
+    a = answer.strip().lower()
+
+    # Frasa yang menandakan "tidak ada info / tidak menemukan"
+    not_found_signals = [
+        "tidak menemukan informasi",
+        "tidak menemukan info",
+        "saya tidak menemukan",
+        "tidak ada informasi",
+        "tidak ada info",
+        "tidak tersedia",
+        "belum tersedia",
+        "saya tidak memiliki informasi",
+        "saya tidak punya informasi",
+        "saya tidak memiliki data",
+        "saya tidak punya data",
+        "saya tidak dapat menemukan",
+        "saya tidak bisa menemukan",
+        "maaf, saya tidak",
+        "maaf saya tidak",
+    ]
+
+    # Frasa yang biasanya muncul pada jawaban fallback (menyarankan sumber lain)
+    redirect_signals = [
+        "silakan kunjungi",
+        "silahkan kunjungi",
+        "website resmi",
+        "hubungi kontak",
+        "kontak yang tersedia",
+        "untuk informasi lebih lanjut",
+    ]
+
+    # Frasa yang menandakan "tidak ada di dokumen"
+    doc_signals = [
+        "dalam dokumen ini",
+        "di dokumen ini",
+        "pada dokumen ini",
+    ]
+
+    score = 0
+    if any(p in a for p in not_found_signals):
+        score += 2
+    if any(p in a for p in redirect_signals):
+        score += 1
+    if any(p in a for p in doc_signals):
+        score += 1
+
+    # Bonus: pola umum "Maaf, ... tidak ... (informasi/data)"
+    if re.search(r"maaf[, ]+.*tidak.*(informasi|data)", a):
+        score += 1
+
+    # Ambang batas: 2 atau lebih dianggap "tidak bisa menjawab"
+    return 0 if score >= 2 else 1
 
 # === Handler Pesan User ===
 # Memory sederhana untuk menyimpan konteks tiap user
@@ -103,35 +163,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"📩 Pesan diterima dari {user_id}: {user_text}")
     await context.bot.send_chat_action(chat_id=user_id, action=ChatAction.TYPING)
 
-    # Ambil riwayat percakapan sebelumnya (kalau ada)
     previous_context = user_memory.get(user_id, "")
 
     try:
-        # Gabungkan pesan baru dengan konteks lama agar LLM tahu riwayatnya
         full_input = f"{previous_context}\n\nPengguna: {user_text}"
 
         response = chain.invoke(full_input)
         answer = response.content.strip()
 
-        # 🔹 Format teks sebelum dikirim
         formatted_answer = format_to_list(answer)
 
-        save_chatlog(user_text, answer, user_id, 1)
+        # ✅ Tentukan status dari jawaban bot
+        status = classify_answer_status(answer)
+
+        # ✅ Simpan dengan status yang benar
+        save_chatlog(user_text, formatted_answer, user_id, status)
 
         print(f"💬 Bot menjawab: {formatted_answer}")
         await update.message.reply_text(
             formatted_answer,
             parse_mode="Markdown",
-            # disable_web_page_preview=True
         )
 
-        # Simpan konteks terbaru (maksimal 5 percakapan terakhir)
         new_context = f"{previous_context}\nPengguna: {user_text}\nBot: {formatted_answer}"
-        user_memory[user_id] = "\n".join(new_context.splitlines()[-10:])  # batasi agar tidak terlalu panjang
+        user_memory[user_id] = "\n".join(new_context.splitlines()[-10:])
 
     except Exception as e:
         print(f"❌ Error: {e}")
+        # optional: simpan error sebagai status 0 atau status khusus (mis. -1)
+        save_chatlog(user_text, f"ERROR: {e}", user_id, 0)
+
         await update.message.reply_text("⚠️ Maaf, terjadi kesalahan saat memproses pesan Anda.")
+
 
 
 

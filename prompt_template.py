@@ -50,7 +50,8 @@ def get_prompt():
 
     6. **Jika informasi benar-benar tidak tersedia dalam dokumen:**
     - Jawab dengan kalimat:
-        "Maaf, saya tidak menemukan informasi terkait di dokumen ini. Berikut isi dokumen yang saya ketahui: {context}"
+        "Maaf, saya tidak menemukan informasi terkait di dokumen ini. Silakan kunjungi website resmi atau hubungi kontak yang tersedia untuk informasi lebih lanjut."
+    - berikan link website resmi jika ada di dokumen.
 
     7. **Jika pertanyaan menyebut 'perhari' atau 'per hari':**
     - Carilah informasi harga yang mengandung kata 'per hari' atau '/ hari' dalam dokumen.
@@ -58,6 +59,10 @@ def get_prompt():
     8. **Jika pertanyaan tentang cara memesan**
     - jangan berikan jawaban menebak, arahkan pengguna untuk mengunjungi website resmi atau menghubungi kontak yang tersedia di dokumen.
 
+    9. **Jika jawaban mengandung data dalam table**
+    - berikan jawaban dalam format list dan sublist.
+    - jangan membuat table dari garis putus putus.
+                                            
     ---
 
     ### 📘 KONTEKS DOKUMEN

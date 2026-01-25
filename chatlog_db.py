@@ -21,7 +21,7 @@ def get_db_connection():
         return None
 
 # === Simpan Chat Log ke Database ===
-def save_chatlog(question: str, answer: str, api_key: str, status: int):
+def save_chatlog(question: str, answer: str, user_id: str, status: int):
     connection = get_db_connection()
     if connection is None:
         return
@@ -30,11 +30,11 @@ def save_chatlog(question: str, answer: str, api_key: str, status: int):
     
     try:
         query = sql.SQL("""
-            INSERT INTO public.h_chatlog (question, answer, api_key, status)
+            INSERT INTO public.h_chatlog (question, answer, user_id, status)
             VALUES (%s, %s, %s, %s)
         """)
         
-        cursor.execute(query, (question, answer, api_key, status))
+        cursor.execute(query, (question, answer, user_id, status))
         connection.commit()
         print("✅ Chatlog berhasil disimpan ke database.")
     except Exception as e:
