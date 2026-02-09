@@ -36,7 +36,14 @@ def load_documents():
             continue
 
         print(f"[INFO] Memuat {file} ...")
-        docs.extend(loader.load())
+        loaded = loader.load()
+        # Tambahkan metadata agar bisa dihapus per-file dari Chroma
+        for d in loaded:
+            try:
+                d.metadata["dataset_file"] = file
+            except Exception:
+                pass
+        docs.extend(loaded)
 
         # Tambahkan ke daftar file yang sudah diproses
         processed_files.add(file)

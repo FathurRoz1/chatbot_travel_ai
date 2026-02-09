@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -19,9 +20,24 @@ from prompt_template import get_prompt
 # === Load file .env ===
 load_dotenv()
 
+# (opsional) batasi siapa yang boleh /restart
+# isi .env: ADMIN_IDS=123456789,987654321
+ADMIN_IDS = {
+    int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",")
+    if x.strip().isdigit()
+}
+
+_reload_lock = asyncio.Lock()
+
+async def _run_blocking(fn, *args, **kwargs):
+    """Jalankan fungsi blocking (create_chain) di thread executor agar event loop tidak nge-freeze."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-oss-safeguard-20b")
 
 CHROMA_PATH = "./chroma_db"
 DATA_PATH = "./data"
@@ -68,6 +84,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Halo 👋! Saya Chatbot Virtual Assistant Travel Malang ID. Silahkan tanyakan apa saja seputar travel di Malang."
     )
+
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else None
+
+    # Jika ADMIN_IDS diisi, maka hanya admin yang boleh
+    if ADMIN_IDS and (user_id not in ADMIN_IDS):
+        await update.message.reply_text("❌ Anda tidak memiliki izin untuk menjalankan /restart.")
+        return
+
+    await update.message.reply_text("🔄 Me-reload dataset & chain... mohon tunggu.")
+
+    global chain
+    async with _reload_lock:
+        try:
+            new_chain = await _run_blocking(create_chain)
+            chain = new_chain
+
+            # opsional: reset memory biar konteks lama tidak “nyangkut” ke dataset baru
+            user_memory.clear()
+
+            await update.message.reply_text("✅ Berhasil! Dataset baru sudah aktif. Silakan coba tanya lagi.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Gagal reload chain: {e}")
+
 
 
 def format_to_list(text: str) -> str:
@@ -177,7 +217,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = classify_answer_status(answer)
 
         # ✅ Simpan dengan status yang benar
-        save_chatlog(user_text, formatted_answer, user_id, status)
+        save_chatlog(user_text, answer, user_id, status)
 
         print(f"💬 Bot menjawab: {formatted_answer}")
         await update.message.reply_text(
@@ -204,10 +244,12 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("restart", restart))  # <-- tambahkan ini
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("🤖 Bot sedang berjalan dengan LangChain + ChromaDB...")
     app.run_polling()
+
 
 
 

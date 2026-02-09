@@ -82,6 +82,61 @@ def _run_build() -> dict:
     }
 
 
+def _save_processed_files(processed: set) -> None:
+    PROCESSED_FILE.write_text(
+        json.dumps(sorted(list(processed)), ensure_ascii=False),
+        encoding="utf-8"
+    )
+
+
+def _delete_from_chroma(filename: str) -> dict:
+    chroma_dir = BASE_DIR / "chroma_db"
+
+    # lazy import supaya flask tetap ringan kalau endpoint ini tidak dipakai
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        from langchain_chroma import Chroma
+    except Exception as e:
+        return {"ok": False, "error": f"Chroma/LangChain import failed: {e}"}
+
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    db = Chroma(persist_directory=str(chroma_dir), embedding_function=embeddings)
+
+    rel_source = str(Path("data") / filename)
+    abs_source = str((DATA_DIR / filename).resolve())
+
+    # Variasi path untuk jaga-jaga (Linux/Windows)
+    candidates = list(dict.fromkeys([
+        rel_source,
+        rel_source.replace("/", "\\"),
+        abs_source,
+        abs_source.replace("/", "\\"),
+    ]))
+
+    errors = []
+    # Metadata baru (jika build_dataset.py sudah ditambah)
+    try:
+        db.delete(where={"dataset_file": filename})
+    except Exception as e:
+        errors.append(f"delete(where=dataset_file) failed: {e}")
+
+    # Metadata bawaan loader (source)
+    for src in candidates:
+        try:
+            db.delete(where={"source": src})
+        except Exception as e:
+            errors.append(f"delete(where=source={src}) failed: {e}")
+
+    # Persist jika method tersedia
+    try:
+        if hasattr(db, "persist"):
+            db.persist()
+    except Exception as e:
+        errors.append(f"persist failed: {e}")
+
+    return {"ok": True, "attempted_sources": candidates, "errors": errors}
+
+
 @app.get("/health")
 def health():
     return jsonify({"ok": True})
@@ -101,7 +156,7 @@ def upload_dataset():
     if not (filename.lower().endswith(".pdf") or filename.lower().endswith(".txt")):
         return jsonify({"ok": False, "error": "Only .pdf or .txt allowed"}), 400
 
-    # === PENGECEKAN DUPLIKAT (nama file) ===
+    # === PENGECEKAN DUPLIKAT 
     processed = _load_processed_files()
     file_path = DATA_DIR / filename
 
@@ -133,6 +188,67 @@ def upload_dataset():
         "saved_as": filename,
         "build": build_result
     }), status
+
+
+@app.post("/datasets/delete")
+def delete_dataset():
+    if not _auth_or_401():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    filename = payload.get("filename") or request.args.get("filename") or request.form.get("filename")
+    if not filename:
+        return jsonify({"ok": False, "error": "filename is required"}), 400
+
+    filename = _safe_filename(filename)
+    file_path = DATA_DIR / filename
+
+    lock = FileLock(str(LOCK_FILE))
+    try:
+        with lock.acquire(timeout=300):
+            # 1) hapus file fisik (kalau ada)
+            file_deleted = False
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                    file_deleted = True
+                except Exception as e:
+                    return jsonify({"ok": False, "error": f"failed to delete file: {e}", "filename": filename}), 500
+
+            # 2) hapus dari processed_files.json supaya bisa upload ulang dengan nama sama
+            processed = _load_processed_files()
+            was_in_processed = filename in processed
+            if was_in_processed:
+                processed.discard(filename)
+                _save_processed_files(processed)
+
+            # 3) hapus dari ChromaDB berdasarkan metadata source / dataset_file
+            chroma_result = _delete_from_chroma(filename)
+
+    except Timeout:
+        return jsonify({"ok": False, "error": "Build is busy (lock timeout). Try again."}), 429
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Jika tidak ada apa-apa yang bisa dihapus, berikan 404
+    if (not file_deleted) and (not was_in_processed):
+        return jsonify({
+            "ok": False,
+            "message": "dataset tidak ditemukan (file tidak ada dan tidak tercatat di processed_files.json)",
+            "filename": filename,
+            "chroma": chroma_result
+        }), 404
+
+    return jsonify({
+        "ok": True,
+        "message": "dataset deleted",
+        "filename": filename,
+        "file_deleted": file_deleted,
+        "was_in_processed": was_in_processed,
+        "chroma": chroma_result
+    }), 200
+
+
 
 
 
