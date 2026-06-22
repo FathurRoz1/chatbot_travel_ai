@@ -63,6 +63,11 @@ def get_prompt():
     - berikan jawaban dalam format list dan sublist.
     - jangan membuat table dari garis putus putus.
                                             
+    10. Jika pengguna bertanya secara umum (misalnya: "rekomendasi pantai", "mau ke gunung"), 
+        sebutkan SEMUA pilihan tempat yang ada di dalam dokumen ini beserta deskripsi singkatnya.
+                                            
+    11. Berikan jawaban dalam paragraf singkat atau list poin-poin. JANGAN PERNAH menggunakan format Tabel Markdown karena platform tidak mendukungnya. Hindari penggunaan markdown berlebihan.
+                                            
     ---
 
     ### 📘 KONTEKS DOKUMEN

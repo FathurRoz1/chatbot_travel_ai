@@ -15,7 +15,7 @@ DATA_DIR = BASE_DIR / "data"
 BUILD_SCRIPT = BASE_DIR / "build_dataset.py"
 LOCK_FILE = BASE_DIR / ".build.lock"
 
-API_TOKEN = os.getenv("DATASET_API_TOKEN", "CHANGE_ME")
+API_TOKEN = os.getenv("DATASET_API_TOKEN", "ROZIBOT")
 
 # Batasi ukuran upload (contoh 50MB)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -90,51 +90,35 @@ def _save_processed_files(processed: set) -> None:
 
 
 def _delete_from_chroma(filename: str) -> dict:
+    """
+    Menghapus dokumen dari ChromaDB menggunakan Native Client (Lebih stabil).
+    """
     chroma_dir = BASE_DIR / "chroma_db"
-
-    # lazy import supaya flask tetap ringan kalau endpoint ini tidak dipakai
+    
     try:
-        from langchain_huggingface import HuggingFaceEmbeddings
-        from langchain_chroma import Chroma
-    except Exception as e:
-        return {"ok": False, "error": f"Chroma/LangChain import failed: {e}"}
+        import chromadb
+    except ImportError:
+        return {"ok": False, "error": "ChromaDB library not found"}
 
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    db = Chroma(persist_directory=str(chroma_dir), embedding_function=embeddings)
-
-    rel_source = str(Path("data") / filename)
-    abs_source = str((DATA_DIR / filename).resolve())
-
-    # Variasi path untuk jaga-jaga (Linux/Windows)
-    candidates = list(dict.fromkeys([
-        rel_source,
-        rel_source.replace("/", "\\"),
-        abs_source,
-        abs_source.replace("/", "\\"),
-    ]))
-
-    errors = []
-    # Metadata baru (jika build_dataset.py sudah ditambah)
     try:
-        db.delete(where={"dataset_file": filename})
+        # 1. Buka koneksi langsung ke DB
+        client = chromadb.PersistentClient(path=str(chroma_dir))
+        
+        # 2. Ambil collection (LangChain biasanya pakai nama 'langchain')
+        collection = client.get_collection("langchain")
+        
+        # 3. Hapus berdasarkan metadata 'dataset_file' (yang Anda set di build_dataset.py)
+        #    Ini jauh lebih aman daripada menebak path source.
+        collection.delete(where={"dataset_file": filename})
+        
+        return {
+            "ok": True, 
+            "message": f"Deleted vectors where dataset_file={filename}",
+            "errors": []
+        }
+        
     except Exception as e:
-        errors.append(f"delete(where=dataset_file) failed: {e}")
-
-    # Metadata bawaan loader (source)
-    for src in candidates:
-        try:
-            db.delete(where={"source": src})
-        except Exception as e:
-            errors.append(f"delete(where=source={src}) failed: {e}")
-
-    # Persist jika method tersedia
-    try:
-        if hasattr(db, "persist"):
-            db.persist()
-    except Exception as e:
-        errors.append(f"persist failed: {e}")
-
-    return {"ok": True, "attempted_sources": candidates, "errors": errors}
+        return {"ok": False, "error": f"Failed to delete from Chroma: {str(e)}"}
 
 
 @app.get("/health")

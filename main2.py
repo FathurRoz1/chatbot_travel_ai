@@ -1,11 +1,14 @@
 import os
 import re
 import asyncio
+from operator import itemgetter
+from langchain_core.runnables import RunnableLambda
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
 from chatlog_db import save_chatlog
+from telegram.error import BadRequest
 
 # === LangChain dan Chroma ===
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -53,6 +56,21 @@ def get_vectorstore():
     return vectordb
 
 
+def print_retrieved_docs(docs):
+    print("\n" + "="*50)
+    print(f"🔍 [DEBUG] MENEMUKAN {len(docs)} DOKUMEN DARI RETRIEVER")
+    print("="*50)
+    
+    for i, doc in enumerate(docs):
+        print(f"\n📄 DOKUMEN {i+1}:")
+        print(f"Metadata : {doc.metadata}")
+        # Cetak 250 karakter pertama saja agar terminal tidak kepenuhan
+        print(f"Konten   : {doc.page_content[:250]}...\n")
+        print("-" * 50)
+    
+    # WAJIB: Return docs kembali agar proses chain bisa berlanjut ke prompt
+    return docs
+
 # === Inisialisasi Chain ===
 def create_chain():
     llm = ChatGroq(
@@ -62,16 +80,28 @@ def create_chain():
     )
 
     vectordb = get_vectorstore()
-    retriever = vectordb.as_retriever(search_kwargs={"k": 3})
+    
+    # UBAH DISINI: Gunakan MMR agar hasil pencarian lebih bervariasi
+    # k=6 berarti mengambil 6 dokumen, fetch_k=20 berarti mencari dari 20 kandidat terbaik
+    retriever = vectordb.as_retriever(
+        search_type="mmr", 
+        search_kwargs={"k": 6, "fetch_k": 20}
+    )
 
     prompt = get_prompt()
 
+    
+
+    # UBAH DISINI: Pisahkan logika pencarian dan prompt
     chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
+        {
+            # "context": itemgetter("question") | retriever | RunnableLambda(print_retrieved_docs), # Hanya gunakan pertanyaan asli untuk mencari
+            "context": itemgetter("question") | retriever, # Hanya gunakan pertanyaan asli untuk mencari
+            "question": itemgetter("full_prompt")          # Gunakan riwayat lengkap untuk dijawab LLM
+        }
         | prompt
         | llm
     )
-
     return chain
 
 
@@ -208,7 +238,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         full_input = f"{previous_context}\n\nPengguna: {user_text}"
 
-        response = chain.invoke(full_input)
+        # UBAH BAGIAN INI: Kirim sebagai dictionary
+        response = chain.invoke({
+            "question": user_text,       # Untuk mencari dokumen di ChromaDB
+            "full_prompt": full_input    # Untuk dibaca oleh LLM bersama riwayat memori
+        })
+
         answer = response.content.strip()
 
         formatted_answer = format_to_list(answer)
@@ -220,10 +255,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_chatlog(user_text, answer, user_id, status)
 
         print(f"💬 Bot menjawab: {formatted_answer}")
-        await update.message.reply_text(
-            formatted_answer,
-            parse_mode="Markdown",
-        )
+        try:
+            # Percobaan Pertama: Kirim dengan gaya Markdown
+            await update.message.reply_text(
+                formatted_answer,
+                parse_mode="Markdown",
+            )
+        except BadRequest as err:
+            # Jika Telegram mengeluh tentang format (Can't parse entities)
+            if "parse entities" in str(err).lower():
+                print("⚠️ [WARNING] Format Markdown ditolak Telegram. Mengirim sebagai teks biasa...")
+                
+                # Percobaan Kedua: Kirim ulang TANPA parse_mode
+                await update.message.reply_text(formatted_answer)
+            else:
+                # Jika errornya bukan karena format, lemparkan ke blok except utama di bawah
+                raise err
+        # ==========================================
 
         new_context = f"{previous_context}\nPengguna: {user_text}\nBot: {formatted_answer}"
         user_memory[user_id] = "\n".join(new_context.splitlines()[-10:])
