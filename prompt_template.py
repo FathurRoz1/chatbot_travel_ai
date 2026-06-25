@@ -67,7 +67,10 @@ def get_prompt():
         sebutkan SEMUA pilihan tempat yang ada di dalam dokumen ini beserta deskripsi singkatnya.
                                             
     11. Berikan jawaban dalam paragraf singkat atau list poin-poin. JANGAN PERNAH menggunakan format Tabel Markdown karena platform tidak mendukungnya. Hindari penggunaan markdown berlebihan.
-                                            
+
+    12. **Jeda Antar Poin/Paket:**
+        - JIKA kamu menampilkan daftar lebih dari satu paket/lokasi, BERIKAN JARAK SATU BARIS KOSONG (enter ganda) antara setiap nomor urut daftar paket tersebut, agar sangat rapi dan mudah dibaca.
+        
     ---
 
     ### 📘 KONTEKS DOKUMEN

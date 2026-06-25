@@ -81,23 +81,37 @@ def create_chain():
 
     vectordb = get_vectorstore()
     
-    # UBAH DISINI: Gunakan MMR agar hasil pencarian lebih bervariasi
-    # k=6 berarti mengambil 6 dokumen, fetch_k=20 berarti mencari dari 20 kandidat terbaik
+    # Gunakan k=8 dan similarity untuk hasil yang lebih fokus ke kata kunci
     retriever = vectordb.as_retriever(
-        search_type="mmr", 
-        search_kwargs={"k": 6, "fetch_k": 20}
+        search_type="similarity", 
+        search_kwargs={"k": 8}
     )
 
     prompt = get_prompt()
 
-    
+    # Tambahkan rewriter prompt agar LLM mengekstrak kata kunci pencarian
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.output_parsers import StrOutputParser
 
-    # UBAH DISINI: Pisahkan logika pencarian dan prompt
+    rewriter_prompt = ChatPromptTemplate.from_template(
+        "Tugasmu adalah mengekstrak KATA KUNCI UTAMA (nama tempat/destinasi/layanan) dari pertanyaan berikut untuk pencarian database.\n"
+        "HAPUS kata-kata umum seperti: wisata, paket, harga, berapa, ke, di, untuk, orang, rekomendasi, dll.\n"
+        "Contoh:\n"
+        "Q: berapa harga wisata ke coban rondo untuk 2 orang?\n"
+        "A: Coban Rondo\n"
+        "Q: rekomendasi pantai di malang\n"
+        "A: Pantai Malang\n"
+        "Q: {question}\n"
+        "A:"
+    )
+    
+    keyword_extractor = rewriter_prompt | llm | StrOutputParser()
+
+    # Gunakan kata kunci yang diekstrak untuk mencari dokumen (retriever)
     chain = (
         {
-            # "context": itemgetter("question") | retriever | RunnableLambda(print_retrieved_docs), # Hanya gunakan pertanyaan asli untuk mencari
-            "context": itemgetter("question") | retriever, # Hanya gunakan pertanyaan asli untuk mencari
-            "question": itemgetter("full_prompt")          # Gunakan riwayat lengkap untuk dijawab LLM
+            "context": itemgetter("question") | keyword_extractor | retriever,
+            "question": itemgetter("full_prompt")
         }
         | prompt
         | llm
@@ -154,8 +168,11 @@ def format_to_list(text: str) -> str:
     # Hapus garis atau karakter yang tidak perlu dari format tabel
     # text = re.sub(r"[--]+", "", text)
 
-    # Bersihkan spasi berlebih
-    text = re.sub(r"\n{2,}", "\n", text).strip()
+    # Tambahkan enter ganda sebelum angka (item list) jika belum ada, agar daftar lebih mudah dibaca
+    text = re.sub(r"(?<!\n)\n(\d+\.\s)", r"\n\n\1", text)
+
+    # Bersihkan spasi berlebih, tapi biarkan enter ganda (maksimal 2 baris baru)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
     return text
 

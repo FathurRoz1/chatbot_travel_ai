@@ -3,5 +3,7 @@ venv/
 api_groq.txt
 *.env
 chroma_db/
+chroma_db/chroma.sqlite3
+chroma_db_test/
 data/
 __pycache__/
